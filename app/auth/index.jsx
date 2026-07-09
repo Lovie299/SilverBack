@@ -3,7 +3,7 @@
 // email/phone method toggle, and register-only language & park selectors.
 // Email auth is wired to the real Firebase AuthContext; success → /gps.
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -30,9 +30,13 @@ import {
   Trees,
   ChevronDown,
   Check,
+  Eye,
+  EyeOff,
+  Fingerprint,
 } from 'lucide-react-native';
 
 import { useAuth } from '../contexts/AuthContext';
+import { setAppLanguage } from '../../lib/i18n';
 import { colors, radius, fonts, shadowCard } from '../../components/ui/theme';
 import { ForestHeader } from '../../components/ui/Primitives';
 import { savePrefs } from '../../components/ui/userPrefs';
@@ -56,10 +60,56 @@ export default function AuthScreen() {
   const [language, setLanguage] = useState('English');
   const [park, setPark] = useState('Bwindi Impenetrable');
   const [loading, setLoading] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
 
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, canUseBiometricLogin, signInWithBiometrics, resetPassword } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const autoPrompted = useRef(false);
+
+  const handleBiometricLogin = async () => {
+    setLoading(true);
+    const result = await signInWithBiometrics();
+    setLoading(false);
+    if (result.success) {
+      router.replace('/gps');
+    } else if (!result.cancelled) {
+      Alert.alert('Biometric sign-in', result.error ?? 'Please sign in with your password.');
+    }
+  };
+
+  // Returning user on this device with biometrics enabled → offer the
+  // shortcut and prompt automatically once, so logging back in is one touch.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const available = await canUseBiometricLogin();
+      if (cancelled) return;
+      setBiometricAvailable(available);
+      if (available && !autoPrompted.current) {
+        autoPrompted.current = true;
+        handleBiometricLogin();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleForgotPassword = async () => {
+    const email = identifier.trim();
+    if (method !== 'email' || !email.includes('@')) {
+      Alert.alert('Forgot password', 'Type your account email in the email field first.');
+      return;
+    }
+    const result = await resetPassword(email);
+    if (result.success) {
+      Alert.alert('Forgot password', `A password reset link has been sent to ${email}.`);
+    } else {
+      Alert.alert('Forgot password', result.error ?? 'Could not send the reset email.');
+    }
+  };
 
   const handleSubmit = async () => {
     if (method === 'phone') {
@@ -88,6 +138,7 @@ export default function AuthScreen() {
     }
     if (mode === 'register') {
       await savePrefs({ fullName: fullName.trim() || 'Friend', language, park });
+      await setAppLanguage(language);
     }
     router.replace('/gps');
   };
@@ -169,13 +220,7 @@ export default function AuthScreen() {
             value={identifier}
             onChangeText={setIdentifier}
           />
-          <Field
-            icon={Lock}
-            placeholder="Password"
-            secureTextEntry
-            value={password}
-            onChangeText={setPassword}
-          />
+          <PasswordField value={password} onChangeText={setPassword} />
 
           {mode === 'register' && (
             <>
@@ -184,7 +229,12 @@ export default function AuthScreen() {
                 label="Preferred language"
                 value={language}
                 options={LANGUAGES}
-                onChange={setLanguage}
+                onChange={(lang) => {
+                  setLanguage(lang);
+                  // Apply instantly so the app is already localized after auth.
+                  setAppLanguage(lang);
+                  savePrefs({ language: lang });
+                }}
               />
               <SelectField
                 icon={Trees}
@@ -197,7 +247,7 @@ export default function AuthScreen() {
           )}
 
           {mode === 'login' && (
-            <TouchableOpacity style={styles.forgotWrap}>
+            <TouchableOpacity style={styles.forgotWrap} onPress={handleForgotPassword} hitSlop={8}>
               <Text style={styles.forgotText}>Forgot password?</Text>
             </TouchableOpacity>
           )}
@@ -216,6 +266,17 @@ export default function AuthScreen() {
               </Text>
             )}
           </TouchableOpacity>
+
+          {mode === 'login' && biometricAvailable && (
+            <TouchableOpacity
+              onPress={handleBiometricLogin}
+              disabled={loading}
+              style={[styles.biometricBtn, loading && { opacity: 0.7 }]}
+            >
+              <Fingerprint size={18} color={colors.primary} />
+              <Text style={styles.biometricText}>Sign in with biometrics</Text>
+            </TouchableOpacity>
+          )}
 
           <View style={styles.dividerRow}>
             <View style={styles.dividerLine} />
@@ -256,6 +317,29 @@ function Field({ icon: Icon, ...inputProps }) {
         style={styles.fieldInput}
         {...inputProps}
       />
+    </View>
+  );
+}
+
+/* ---------- Password row with show/hide toggle ---------- */
+
+export function PasswordField({ placeholder = 'Password', ...inputProps }) {
+  const [visible, setVisible] = useState(false);
+  const ToggleIcon = visible ? EyeOff : Eye;
+  return (
+    <View style={styles.field}>
+      <Lock size={18} color={colors.mutedForeground} />
+      <TextInput
+        placeholder={placeholder}
+        placeholderTextColor={colors.mutedForeground}
+        secureTextEntry={!visible}
+        autoCapitalize="none"
+        style={styles.fieldInput}
+        {...inputProps}
+      />
+      <TouchableOpacity onPress={() => setVisible((v) => !v)} hitSlop={8}>
+        <ToggleIcon size={18} color={colors.mutedForeground} />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -412,6 +496,18 @@ const styles = StyleSheet.create({
   },
   forgotWrap: { alignSelf: 'flex-end', marginTop: -8 },
   forgotText: { fontSize: 12, fontFamily: fonts.semibold, color: colors.primary },
+  biometricBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+  },
+  biometricText: { fontSize: 14, fontFamily: fonts.semibold, color: colors.primary },
   submitBtn: {
     backgroundColor: colors.primary,
     paddingVertical: 16,

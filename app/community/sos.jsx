@@ -1,7 +1,7 @@
 // app/community/sos.jsx — SOS Emergency
 // (matches silverbacksentry.lovable.app "/community/sos")
-// Press-and-hold SOS button with pulsing halos, live location card,
-// and UWA / 999 quick-dial tiles.
+// Press-and-hold (1.5s) SOS button with pulsing halos, live GPS location card,
+// haptic dispatch confirmation, and UWA / 999 quick-dial tiles.
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -13,20 +13,39 @@ import {
   Pressable,
   Animated,
   Linking,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { MapPin, OctagonAlert, Phone, Shield } from 'lucide-react-native';
+import { useTranslation } from 'react-i18next';
+import * as Location from 'expo-location';
+import * as Haptics from 'expo-haptics';
+import { GeoPoint, addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { Check, MapPin, OctagonAlert, Phone, Shield } from 'lucide-react-native';
 
+import { useAuth } from '../contexts/AuthContext';
+import { db } from '../../firebaseConfig';
 import { colors, gradients, radius, fonts, alpha, shadowCard } from '../../components/ui/theme';
 import { AppBar, Card } from '../../components/ui/Primitives';
 import { useUserPrefs } from '../../components/ui/userPrefs';
 
+const HOLD_DURATION_MS = 1500;
+
 export default function SosEmergency() {
   const prefs = useUserPrefs();
+  const { user } = useAuth();
+  const { t } = useTranslation();
   const [pressed, setPressed] = useState(false);
+  const [position, setPosition] = useState(null);
+  const [place, setPlace] = useState(null);
+  const [locationError, setLocationError] = useState(null);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
 
   // Slow pulse on the outer halo, echoing the web animate-pulse.
   const pulse = useRef(new Animated.Value(0)).current;
+  // Pop animation confirming dispatch the moment the hold threshold is hit.
+  const confirmScale = useRef(new Animated.Value(1)).current;
+
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
@@ -36,13 +55,96 @@ export default function SosEmergency() {
     ).start();
   }, [pulse]);
 
+  // Continuous tracking: bind the device's precise GPS fix on mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        if (!cancelled) setLocationError(t('sos.locationDenied'));
+        return;
+      }
+      try {
+        const current = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        if (cancelled) return;
+        setPosition(current);
+        try {
+          const [geo] = await Location.reverseGeocodeAsync(current.coords);
+          if (!cancelled && geo) {
+            setPlace(
+              [geo.city || geo.subregion || geo.district, geo.region]
+                .filter(Boolean)
+                .join(', '),
+            );
+          }
+        } catch {
+          // Reverse geocoding is cosmetic; coordinates alone are enough.
+        }
+      } catch (error) {
+        if (!cancelled) setLocationError(error.message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
+
+  const dispatchSos = async () => {
+    if (sending || sent) return;
+    setSending(true);
+
+    // Instant physical confirmation the moment the hold threshold is reached.
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    Animated.sequence([
+      Animated.spring(confirmScale, { toValue: 1.15, useNativeDriver: true }),
+      Animated.spring(confirmScale, { toValue: 1, useNativeDriver: true }),
+    ]).start();
+
+    try {
+      // Refresh the fix at dispatch time so the payload carries the precise
+      // current position, falling back to the mount-time fix.
+      let coords = position?.coords ?? null;
+      try {
+        const fresh = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        coords = fresh.coords;
+        setPosition(fresh);
+      } catch {
+        // keep the previous fix
+      }
+
+      await addDoc(collection(db, 'reports'), {
+        reporterId: user?.uid ?? 'anonymous',
+        type: 'dangerous_sighting',
+        severity: 'critical',
+        sos: true,
+        park: prefs.park,
+        coordinate: coords ? new GeoPoint(coords.latitude, coords.longitude) : null,
+        accuracy: coords?.accuracy ?? null,
+        timestamp: serverTimestamp(),
+        isArchived: false,
+        status: 'pending',
+      });
+
+      setSent(true);
+      Alert.alert(t('sos.sent'), t('sos.sentBody'));
+    } catch (error) {
+      Alert.alert('SOS', `Could not send the alert: ${error.message}`);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const coords = position?.coords;
+
   return (
     <View style={styles.root}>
-      <AppBar title="SOS Emergency" subtitle="One-tap ranger dispatch" back="/community" />
+      <AppBar title={t('sos.title')} subtitle={t('sos.subtitle')} back="/community" />
       <ScrollView contentContainerStyle={styles.list}>
-        <Text style={styles.intro}>
-          Press and hold to alert {prefs.park} rangers with your live location.
-        </Text>
+        <Text style={styles.intro}>{t('sos.intro', { park: prefs.park })}</Text>
 
         {/* ---------- SOS button with halos ---------- */}
         <View style={styles.sosWrap}>
@@ -57,17 +159,28 @@ export default function SosEmergency() {
           <Pressable
             onPressIn={() => setPressed(true)}
             onPressOut={() => setPressed(false)}
-            style={{ transform: [{ scale: pressed ? 0.95 : 1 }] }}
+            onLongPress={dispatchSos}
+            delayLongPress={HOLD_DURATION_MS}
           >
-            <LinearGradient
-              colors={gradients.sos}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.sosButton}
+            <Animated.View
+              style={{ transform: [{ scale: pressed ? 0.95 : 1 }, { scale: confirmScale }] }}
             >
-              <OctagonAlert size={40} color={colors.white} />
-              <Text style={styles.sosText}>SOS</Text>
-            </LinearGradient>
+              <LinearGradient
+                colors={sent ? gradients.primaryTile : gradients.sos}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.sosButton}
+              >
+                {sent ? (
+                  <Check size={40} color={colors.white} />
+                ) : (
+                  <OctagonAlert size={40} color={colors.white} />
+                )}
+                <Text style={styles.sosText}>
+                  {sent ? t('sos.sent') : sending ? t('sos.sending') : 'SOS'}
+                </Text>
+              </LinearGradient>
+            </Animated.View>
           </Pressable>
         </View>
 
@@ -75,10 +188,19 @@ export default function SosEmergency() {
         <Card style={styles.locationCard}>
           <View style={styles.locationHead}>
             <MapPin size={14} color={colors.primary} />
-            <Text style={styles.locationLabel}>Your live location</Text>
+            <Text style={styles.locationLabel}>{t('sos.liveLocation')}</Text>
           </View>
-          <Text style={styles.locationPlace}>Pakwach, Buliisa District</Text>
-          <Text style={styles.locationCoords}>Lat 2.0421°N · Lon 31.4612°E · ±8m</Text>
+          {coords ? (
+            <>
+              <Text style={styles.locationPlace}>{place ?? prefs.park}</Text>
+              <Text style={styles.locationCoords}>
+                Lat {coords.latitude.toFixed(4)}° · Lon {coords.longitude.toFixed(4)}°
+                {coords.accuracy != null ? ` · ±${Math.round(coords.accuracy)}m` : ''}
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.locationPlace}>{locationError ?? t('sos.locating')}</Text>
+          )}
         </Card>
 
         {/* ---------- Quick-dial tiles ---------- */}

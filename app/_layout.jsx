@@ -26,6 +26,7 @@ import { registerBackgroundSync } from './backgroundSync';
 import PerformanceMonitor from './utils/performanceMonitor';
 import { colors } from '../components/ui/theme';
 import '../firebaseConfig';
+import '../lib/i18n';
 
 function AppContent() {
   useEffect(() => {

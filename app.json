@@ -11,7 +11,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#2c5f2d"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.silverback.sentry"
@@ -27,6 +29,7 @@
       },
       "permissions": [
         "CAMERA",
+        "RECORD_AUDIO",
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "USE_BIOMETRIC"
@@ -37,7 +40,14 @@
       "expo-local-authentication",
       "expo-image-picker",
       "expo-camera",
-      "expo-location"
+      "expo-location",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow SilverBack Sentry to record voice notes for wildlife reports."
+        }
+      ],
+      "expo-secure-store"
     ],
     "extra": {
       "eas": {

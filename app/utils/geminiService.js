@@ -19,9 +19,9 @@ class GeminiService {
     
     try {
       this.genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-      // Use gemini-1.5-flash which you confirmed is available
-      this.model = this.genAI.getGenerativeModel({ 
-        model: 'gemini-1.5-flash',
+      // gemini-1.5-flash was retired; 2.5-flash is the current stable model.
+      this.model = this.genAI.getGenerativeModel({
+        model: 'gemini-2.5-flash',
         generationConfig: {
           temperature: 0.7,
           maxOutputTokens: 1024,

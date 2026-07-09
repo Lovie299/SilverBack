@@ -103,6 +103,17 @@ service cloud.firestore {
       allow write: if isRangerOrAdmin();
     }
 
+    // ---------- chatMessages ----------
+    // Community ↔ ranger group chat: any signed-in user may read and post
+    // messages as themselves; messages are immutable once sent.
+
+    match /chatMessages/{messageId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.senderId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
     // ---------- default deny ----------
 
     match /{document=**} {

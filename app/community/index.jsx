@@ -1,18 +1,19 @@
 // app/community/index.jsx — Community dashboard
 // (matches silverbacksentry.lovable.app "/community")
 // Forest header with greeting + overlapping impact card, alerts entry row,
-// quick-report tiles, recent reports, and nearby-alert map card.
+// quick-report tiles, live recent reports (Firestore), and nearby-alert map card.
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
   Bird,
   Camera,
   ChevronRight,
-  Leaf,
   MapPin,
   Megaphone,
   Receipt,
@@ -21,18 +22,77 @@ import {
 } from 'lucide-react-native';
 
 import { useAuth } from '../contexts/AuthContext';
+import { db } from '../../firebaseConfig';
 import { colors, gradients, radius, fonts, alpha, shadowCard } from '../../components/ui/theme';
 import { Badge, Card } from '../../components/ui/Primitives';
 import { useUserPrefs, initials } from '../../components/ui/userPrefs';
+
+/** Firestore Timestamp | Date | millis → short display string. */
+export function formatReportTime(timestamp) {
+  const date = timestamp?.toDate ? timestamp.toDate() : timestamp ? new Date(timestamp) : null;
+  if (!date) return '';
+  const now = new Date();
+  const time = date.toTimeString().slice(0, 5);
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dayDiff = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
+  if (dayDiff === 0) return `Today · ${time}`;
+  if (dayDiff === 1) return `Yesterday · ${time}`;
+  return `${date.toLocaleDateString()} · ${time}`;
+}
+
+/** Shared status → badge tone mapping for report rows. */
+export const REPORT_STATUS_TONES = {
+  pending: { tone: 'warning', label: 'Pending' },
+  confirmed: { tone: 'success', label: 'Confirmed' },
+  investigating: { tone: 'warning', label: 'In Review' },
+  resolved: { tone: 'success', label: 'Resolved' },
+  escalated: { tone: 'danger', label: 'Escalated' },
+};
+
+/**
+ * Live "my sightings" hook: mirrors the user's `sightings` documents in
+ * real time, newest first. Ordering is done client-side so no composite
+ * Firestore index deployment is required for the equality filter.
+ */
+export function useMySightings(uid) {
+  const [sightings, setSightings] = useState([]);
+  useEffect(() => {
+    if (!uid) {
+      setSightings([]);
+      return undefined;
+    }
+    const q = query(collection(db, 'sightings'), where('reporterId', '==', uid));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        docs.sort((a, b) => {
+          const ta = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+          const tb = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+          return tb - ta;
+        });
+        setSightings(docs);
+      },
+      (error) => console.warn('[dashboard] sightings listener error:', error.message),
+    );
+    return unsubscribe;
+  }, [uid]);
+  return sightings;
+}
 
 export default function CommunityDashboard() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const prefs = useUserPrefs();
   const { user } = useAuth();
+  const { t } = useTranslation();
 
   const fullName = user?.displayName || prefs.fullName;
   const firstName = fullName.split(/\s+/)[0] || 'Friend';
+
+  const sightings = useMySightings(user?.uid);
+  const recent = sightings.slice(0, 3);
+  const resolvedCount = sightings.filter((s) => s.status === 'resolved').length;
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={{ paddingBottom: 24 }}>
@@ -54,7 +114,7 @@ export default function CommunityDashboard() {
             </TouchableOpacity>
             <View style={{ flexShrink: 1 }}>
               <Text numberOfLines={1} style={styles.greeting}>
-                Hi, {firstName}
+                {t('dashboard.greeting', { name: firstName })}
               </Text>
               <Text numberOfLines={1} style={styles.greetingMeta}>
                 {prefs.park} · {prefs.language}
@@ -63,18 +123,22 @@ export default function CommunityDashboard() {
           </View>
         </View>
 
-        {/* Impact card overlapping the header edge */}
+        {/* Impact card overlapping the header edge — doubles as the Reports button */}
         <View style={styles.impactWrap}>
-          <Card style={styles.impactCard}>
-            <View style={styles.impactIcon}>
-              <TreePine size={22} color={colors.accentForeground} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.impactLabel}>Community impact this month</Text>
-              <Text style={styles.impactValue}>12 reports · 4 resolved</Text>
-            </View>
-            <Badge tone="success">+18%</Badge>
-          </Card>
+          <TouchableOpacity activeOpacity={0.8} onPress={() => router.push('/community/reports')}>
+            <Card style={styles.impactCard}>
+              <View style={styles.impactIcon}>
+                <TreePine size={22} color={colors.accentForeground} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.impactLabel}>{t('dashboard.impactLabel')}</Text>
+                <Text style={styles.impactValue}>
+                  {sightings.length} reports · {resolvedCount} resolved
+                </Text>
+              </View>
+              <ChevronRight size={16} color={colors.mutedForeground} />
+            </Card>
+          </TouchableOpacity>
         </View>
       </LinearGradient>
 
@@ -91,8 +155,10 @@ export default function CommunityDashboard() {
               <Megaphone size={22} color={colors.white} />
             </LinearGradient>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.alertsTitle}>Community Alerts</Text>
-              <Text style={styles.alertsMeta}>3 new alerts in {prefs.park}</Text>
+              <Text style={styles.alertsTitle}>{t('dashboard.communityAlerts')}</Text>
+              <Text style={styles.alertsMeta}>
+                {t('dashboard.newAlerts', { count: 3, park: prefs.park })}
+              </Text>
             </View>
             <Badge tone="danger">3</Badge>
             <ChevronRight size={16} color={colors.mutedForeground} />
@@ -101,81 +167,89 @@ export default function CommunityDashboard() {
 
         {/* ---------- Quick report tiles ---------- */}
         <View>
-          <Text style={styles.sectionTitle}>Quick report</Text>
+          <Text style={styles.sectionTitle}>{t('dashboard.quickReport')}</Text>
           <View style={styles.tileRow}>
             <QuickTile
               onPress={() => router.push('/community/sighting')}
               gradient={gradients.primaryTile}
               icon={Camera}
-              label={'Wildlife\nSighting'}
+              label={t('dashboard.tileSighting')}
             />
             <QuickTile
               onPress={() => router.push('/community/conflict')}
               gradient={gradients.dangerTile}
               icon={TriangleAlert}
-              label={'Human–Wildlife\nConflict'}
+              label={t('dashboard.tileConflict')}
             />
             <QuickTile
               onPress={() => router.push('/community/claim')}
               gradient={gradients.accentTile}
               icon={Receipt}
-              label={'Compensation\nClaim'}
+              label={t('dashboard.tileClaim')}
               darkText
             />
           </View>
         </View>
 
-        {/* ---------- Recent reports ---------- */}
+        {/* ---------- Recent reports (live) ---------- */}
         <View>
           <View style={styles.sectionRow}>
-            <Text style={styles.sectionTitle}>My recent reports</Text>
-            <Text style={styles.seeAll}>See all</Text>
+            <Text style={styles.sectionTitle}>{t('dashboard.myRecentReports')}</Text>
+            <TouchableOpacity onPress={() => router.push('/community/reports')} hitSlop={8}>
+              <Text style={styles.seeAll}>{t('dashboard.seeAll')}</Text>
+            </TouchableOpacity>
           </View>
           <View style={{ gap: 8 }}>
-            <ReportRow
-              icon={Bird}
-              tone="success"
-              title="Grey Crowned Crane sighting"
-              meta="Today · 08:12 · Buliisa"
-              status="Confirmed"
-            />
-            <ReportRow
-              icon={TriangleAlert}
-              tone="warning"
-              title="Elephants near maize field"
-              meta="Yesterday · Kichwamba"
-              status="In Review"
-            />
-            <ReportRow
-              icon={Leaf}
-              tone="danger"
-              title="Snare trap found"
-              meta="2 days ago · Wairingo"
-              status="Escalated"
-            />
+            {recent.length === 0 ? (
+              <Card style={styles.reportRow}>
+                <View style={[styles.reportIcon, { backgroundColor: alpha(colors.primary, 0.1) }]}>
+                  <Bird size={18} color={colors.primary} />
+                </View>
+                <Text style={[styles.reportMeta, { flex: 1 }]}>{t('dashboard.noReports')}</Text>
+              </Card>
+            ) : (
+              recent.map((sighting) => (
+                <ReportRow
+                  key={sighting.id}
+                  sighting={sighting}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/community/report/[id]',
+                      params: { id: sighting.id },
+                    })
+                  }
+                />
+              ))
+            )}
           </View>
         </View>
 
         {/* ---------- Nearby alert / live map card ---------- */}
         <Card style={{ padding: 16 }}>
-          <View style={styles.nearbyRow}>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            style={styles.nearbyRow}
+            onPress={() => router.push('/community/alerts')}
+          >
             <View style={styles.nearbyIcon}>
               <MapPin size={16} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.nearbyTitle}>Nearby alert</Text>
-              <Text style={styles.nearbyMeta}>Elephant herd movement — 3.2km west</Text>
+              <Text style={styles.nearbyTitle}>{t('dashboard.nearbyAlert')}</Text>
+              <Text style={styles.nearbyMeta}>{t('dashboard.nearbyMeta')}</Text>
             </View>
             <ChevronRight size={16} color={colors.mutedForeground} />
-          </View>
-          <LinearGradient
-            colors={gradients.sky}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
-            style={styles.mapPreview}
-          >
-            <Text style={styles.mapPreviewText}>Live community map</Text>
-          </LinearGradient>
+          </TouchableOpacity>
+          <TouchableOpacity activeOpacity={0.85} onPress={() => router.push('/community/map')}>
+            <LinearGradient
+              colors={gradients.sky}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={styles.mapPreview}
+            >
+              <Text style={styles.mapPreviewText}>{t('dashboard.liveMap')}</Text>
+            </LinearGradient>
+          </TouchableOpacity>
         </Card>
       </View>
     </ScrollView>
@@ -201,7 +275,7 @@ function QuickTile({ onPress, gradient, icon: Icon, label, darkText = false }) {
   );
 }
 
-/* ---------- Recent report row ---------- */
+/* ---------- Recent report row (live Firestore document) ---------- */
 
 const reportTones = {
   success: { bg: alpha(colors.success, 0.15), fg: colors.success },
@@ -209,21 +283,32 @@ const reportTones = {
   danger: { bg: alpha(colors.destructive, 0.15), fg: colors.destructive },
 };
 
-function ReportRow({ icon: Icon, tone, title, meta, status }) {
-  const t = reportTones[tone];
+export function ReportRow({ sighting, onPress }) {
+  const status = REPORT_STATUS_TONES[sighting.status] ?? REPORT_STATUS_TONES.pending;
+  const t = reportTones[status.tone] ?? reportTones.warning;
+  const Icon = sighting.type === 'sos' ? TriangleAlert : Bird;
+  const title = sighting.speciesLabel
+    ? `${sighting.speciesLabel} sighting`
+    : sighting.title || 'Wildlife report';
+  const metaParts = [formatReportTime(sighting.timestamp), sighting.park].filter(Boolean);
+
   return (
-    <Card style={styles.reportRow}>
-      <View style={[styles.reportIcon, { backgroundColor: t.bg }]}>
-        <Icon size={18} color={t.fg} />
-      </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text numberOfLines={1} style={styles.reportTitle}>
-          {title}
-        </Text>
-        <Text style={styles.reportMeta}>{meta}</Text>
-      </View>
-      <Badge tone={tone}>{status}</Badge>
-    </Card>
+    <TouchableOpacity activeOpacity={0.8} onPress={onPress}>
+      <Card style={styles.reportRow}>
+        <View style={[styles.reportIcon, { backgroundColor: t.bg }]}>
+          <Icon size={18} color={t.fg} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text numberOfLines={1} style={styles.reportTitle}>
+            {title}
+          </Text>
+          <Text numberOfLines={1} style={styles.reportMeta}>
+            {metaParts.join(' · ')}
+          </Text>
+        </View>
+        <Badge tone={status.tone}>{status.label}</Badge>
+      </Card>
+    </TouchableOpacity>
   );
 }
 

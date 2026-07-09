@@ -7,7 +7,8 @@ import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-nativ
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft, Home, Newspaper, OctagonAlert } from 'lucide-react-native';
+import { useTranslation } from 'react-i18next';
+import { ChevronLeft, Home, Map as MapIcon, MessageCircle, Newspaper, OctagonAlert } from 'lucide-react-native';
 
 import { colors, gradients, radius, shadowCard, fonts, alpha } from './theme';
 
@@ -83,21 +84,24 @@ export function AppBar({ title, subtitle, back, dark = false, right = null }) {
 /* ============================= BottomNav ================================ */
 
 const NAV_ITEMS = [
-  { to: '/community', icon: Home, label: 'Home' },
-  { to: '/community/feed', icon: Newspaper, label: 'Feed' },
-  { to: '/community/sos', icon: OctagonAlert, label: 'SOS' },
+  { to: '/community', icon: Home, labelKey: 'nav.home' },
+  { to: '/community/feed', icon: Newspaper, labelKey: 'nav.feed' },
+  { to: '/community/map', icon: MapIcon, labelKey: 'nav.map' },
+  { to: '/community/chat', icon: MessageCircle, labelKey: 'nav.chat' },
+  { to: '/community/sos', icon: OctagonAlert, labelKey: 'nav.sos' },
 ];
 
 export function BottomNav() {
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
 
   return (
     <View style={[styles.navBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
       {NAV_ITEMS.map((item) => {
         const active = pathname === item.to;
-        const isSos = item.label === 'SOS';
+        const isSos = item.labelKey === 'nav.sos';
         const Icon = item.icon;
         const iconBg = isSos
           ? colors.destructive
@@ -124,7 +128,7 @@ export function BottomNav() {
                 { color: active ? colors.primary : colors.mutedForeground },
               ]}
             >
-              {item.label}
+              {t(item.labelKey)}
             </Text>
           </Pressable>
         );
@@ -217,9 +221,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   navItem: {
+    flex: 1,
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 16,
+    paddingHorizontal: 4,
     paddingVertical: 6,
   },
   navIconWrap: {

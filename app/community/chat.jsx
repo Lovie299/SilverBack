@@ -12,7 +12,6 @@ import {
   TextInput,
   TouchableOpacity,
   KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -113,7 +112,7 @@ function ChatBody() {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
     >
       <FlatList
         ref={listRef}
@@ -183,7 +182,7 @@ const styles = StyleSheet.create({
   },
   aiButtonText: { fontSize: 12, fontFamily: fonts.semibold, color: colors.primary },
   list: { paddingHorizontal: 20, paddingVertical: 12, gap: 10 },
-  emptyWrap: { paddingVertical: 48, alignItems: 'center', transform: [{ scaleY: -1 }] },
+  emptyWrap: { paddingVertical: 48, alignItems: 'center' },
   emptyText: { fontSize: 13, color: colors.mutedForeground, fontFamily: fonts.regular },
   messageRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   msgAvatar: {

@@ -13,7 +13,6 @@ import {
   TextInput,
   TouchableOpacity,
   KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -72,7 +71,7 @@ function AiChatBody() {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
     >
       <FlatList
         data={messages}
@@ -137,7 +136,7 @@ function AiChatBody() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
   list: { paddingHorizontal: 20, paddingVertical: 12, gap: 10 },
-  emptyWrap: { paddingVertical: 48, alignItems: 'center', gap: 12, transform: [{ scaleY: -1 }] },
+  emptyWrap: { paddingVertical: 48, alignItems: 'center', gap: 12 },
   emptyIcon: {
     height: 56,
     width: 56,

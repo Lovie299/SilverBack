@@ -1,7 +1,10 @@
 // app/utils/geminiService.js
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const GEMINI_API_KEY = 'AIzaSyANWNDoSBwsRQEtba02fMw5fGkFAg4GDUI';
+// The previous hardcoded key was revoked by Google after being detected in a
+// public repository ("API key was reported as leaked"). Supply a fresh key
+// via .env — never commit it:  EXPO_PUBLIC_GEMINI_API_KEY=...
+const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '';
 
 class GeminiService {
   constructor() {
@@ -73,7 +76,9 @@ Question: ${prompt}`;
       return text;
       
     } catch (error) {
-      console.error('Gemini API error:', error);
+      // warn (not error) so Expo doesn't surface a red LogBox toast over the
+      // chat — the fallback answer below keeps the assistant usable offline.
+      console.warn('Gemini API error:', error.message);
       return this.getFallbackResponse(prompt);
     }
   }

@@ -2,13 +2,21 @@
 // Route parameter `id` addresses the Firestore `sightings` document, which is
 // mirrored live so ranger status changes appear while the screen is open.
 
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  TouchableOpacity,
+} from 'react-native';
 import { Image } from 'expo-image';
 import { useLocalSearchParams } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { MapPin, Mic } from 'lucide-react-native';
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
+import { MapPin, Play } from 'lucide-react-native';
 
 import { db } from '../../../firebaseConfig';
 import { colors, radius, fonts, alpha } from '../../../components/ui/theme';
@@ -20,6 +28,21 @@ export default function ReportDetail() {
   const { t } = useTranslation();
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
+  const playerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      playerRef.current?.remove();
+    };
+  }, []);
+
+  const playVoiceNote = async () => {
+    if (!report?.voiceNoteUrl) return;
+    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+    playerRef.current?.remove();
+    playerRef.current = createAudioPlayer({ uri: report.voiceNoteUrl });
+    playerRef.current.play();
+  };
 
   useEffect(() => {
     if (!id) return undefined;
@@ -105,12 +128,12 @@ export default function ReportDetail() {
           {report.voiceNoteUrl ? (
             <Card style={styles.card}>
               <FieldLabel>{t('sighting.voiceNote')}</FieldLabel>
-              <View style={styles.voiceRow}>
+              <TouchableOpacity style={styles.voiceRow} onPress={playVoiceNote}>
                 <View style={styles.voiceIcon}>
-                  <Mic size={16} color={colors.primary} />
+                  <Play size={16} color={colors.primary} />
                 </View>
-                <Text style={styles.meta}>Voice note attached</Text>
-              </View>
+                <Text style={styles.meta}>Tap to play the voice note</Text>
+              </TouchableOpacity>
             </Card>
           ) : null}
         </ScrollView>

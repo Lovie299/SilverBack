@@ -11,6 +11,8 @@ export const DEFAULT_PREFS = {
   fullName: 'Friend',
   language: 'English',
   park: 'Bwindi Impenetrable',
+  /** Profile picture URI (Storage download URL, or a durable local copy). */
+  avatar: null,
 };
 
 const listeners = new Set();

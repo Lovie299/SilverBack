@@ -21,7 +21,13 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
+import { Directory, File, Paths } from 'expo-file-system';
+import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
+import { updateProfile } from 'firebase/auth';
 import {
+  Camera,
   Check,
   ChevronRight,
   Fingerprint,
@@ -32,6 +38,8 @@ import {
   Trees,
   User as UserIcon,
 } from 'lucide-react-native';
+
+import { auth, storage } from '../../firebaseConfig';
 
 import { useAuth } from '../contexts/AuthContext';
 import { setAppLanguage, LANGUAGES } from '../../lib/i18n';
@@ -47,6 +55,21 @@ const PARKS = [
   'Kibale',
   'Other / future parks',
 ];
+
+// Copy picker output out of the purgeable OS cache into app documents.
+const avatarDirectory = new Directory(Paths.document, 'avatar');
+
+function persistAvatarCopy(uri) {
+  try {
+    if (!avatarDirectory.exists) avatarDirectory.create({ intermediates: true });
+    const dest = new File(avatarDirectory, `avatar-${Date.now()}.jpg`);
+    new File(uri).copy(dest);
+    return dest.uri;
+  } catch (error) {
+    console.warn('[profile] could not persist avatar copy:', error.message);
+    return uri;
+  }
+}
 
 export default function Profile() {
   const router = useRouter();
@@ -68,8 +91,66 @@ export default function Profile() {
   // 'password' | 'delete' | null.
   const [sheet, setSheet] = useState(null);
   const [biometricBusy, setBiometricBusy] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
 
   const fullName = user?.displayName || prefs.fullName;
+  const avatarUri = prefs.avatar || user?.photoURL || null;
+
+  const applyPickedAvatar = async (pickedUri) => {
+    setAvatarBusy(true);
+    // Durable local copy first — the picture shows immediately and survives
+    // even if the Storage upload below cannot complete offline.
+    let finalUri = persistAvatarCopy(pickedUri);
+    try {
+      const response = await fetch(finalUri);
+      const blob = await response.blob();
+      const fileRef = storageRef(storage, `avatars/${user.uid}`);
+      await uploadBytes(fileRef, blob, { contentType: 'image/jpeg' });
+      finalUri = await getDownloadURL(fileRef);
+      // photoURL must be an http(s) URL — only set after a successful upload.
+      if (auth.currentUser) {
+        await updateProfile(auth.currentUser, { photoURL: finalUri }).catch(() => {});
+      }
+    } catch (error) {
+      console.warn('[profile] avatar upload failed, keeping local copy:', error.message);
+    }
+    await savePrefs({ avatar: finalUri });
+    setAvatarBusy(false);
+  };
+
+  const changeAvatar = () => {
+    Alert.alert('Profile picture', 'How would you like to set your picture?', [
+      {
+        text: 'Take photo',
+        onPress: async () => {
+          const permission = await ImagePicker.requestCameraPermissionsAsync();
+          if (permission.status !== 'granted') return;
+          const result = await ImagePicker.launchCameraAsync({
+            mediaTypes: ['images'],
+            quality: 0.7,
+            allowsEditing: true,
+            aspect: [1, 1],
+          });
+          if (!result.canceled && result.assets?.[0]?.uri) applyPickedAvatar(result.assets[0].uri);
+        },
+      },
+      {
+        text: 'Choose from library',
+        onPress: async () => {
+          const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (permission.status !== 'granted') return;
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            quality: 0.7,
+            allowsEditing: true,
+            aspect: [1, 1],
+          });
+          if (!result.canceled && result.assets?.[0]?.uri) applyPickedAvatar(result.assets[0].uri);
+        },
+      },
+      { text: t('common.cancel'), style: 'cancel' },
+    ]);
+  };
 
   const handleLogout = async () => {
     const result = await logout();
@@ -102,9 +183,20 @@ export default function Profile() {
       <AppBar title={t('profile.title')} subtitle={t('profile.subtitle')} back="/community" />
       <ScrollView contentContainerStyle={styles.content}>
         <Card style={styles.card}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials(fullName)}</Text>
-          </View>
+          <TouchableOpacity onPress={changeAvatar} disabled={avatarBusy}>
+            <View style={styles.avatar}>
+              {avatarBusy ? (
+                <ActivityIndicator color={colors.primaryForeground} />
+              ) : avatarUri ? (
+                <Image source={{ uri: avatarUri }} style={styles.avatarImage} contentFit="cover" />
+              ) : (
+                <Text style={styles.avatarText}>{initials(fullName)}</Text>
+              )}
+            </View>
+            <View style={styles.avatarBadge}>
+              <Camera size={12} color={colors.primaryForeground} />
+            </View>
+          </TouchableOpacity>
           <Text style={styles.name}>{fullName}</Text>
           {user?.email ? <Text style={styles.meta}>{user.email}</Text> : null}
           <Text style={styles.meta}>
@@ -478,6 +570,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
+    overflow: 'hidden',
+  },
+  avatarImage: { height: '100%', width: '100%' },
+  avatarBadge: {
+    position: 'absolute',
+    bottom: 8,
+    right: -2,
+    height: 24,
+    width: 24,
+    borderRadius: 999,
+    backgroundColor: colors.primary,
+    borderWidth: 2,
+    borderColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarText: { color: colors.primaryForeground, fontSize: 24, fontFamily: fonts.bold },
   name: { fontSize: 18, fontFamily: fonts.displayBold, color: colors.foreground },

@@ -5,6 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -110,7 +111,15 @@ export default function CommunityDashboard() {
               onPress={() => router.push('/community/profile')}
               style={styles.avatar}
             >
-              <Text style={styles.avatarText}>{initials(fullName)}</Text>
+              {prefs.avatar || user?.photoURL ? (
+                <Image
+                  source={{ uri: prefs.avatar || user.photoURL }}
+                  style={styles.avatarImage}
+                  contentFit="cover"
+                />
+              ) : (
+                <Text style={styles.avatarText}>{initials(fullName)}</Text>
+              )}
             </TouchableOpacity>
             <View style={{ flexShrink: 1 }}>
               <Text numberOfLines={1} style={styles.greeting}>
@@ -336,7 +345,9 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
+  avatarImage: { height: '100%', width: '100%', borderRadius: 999 },
   avatarText: { color: colors.white, fontSize: 14, fontFamily: fonts.bold },
   greeting: { color: colors.white, fontSize: 20, fontFamily: fonts.displayBold },
   greetingMeta: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontFamily: fonts.regular },

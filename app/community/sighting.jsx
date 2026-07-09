@@ -24,6 +24,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import { Directory, File, Paths } from 'expo-file-system';
 import {
   AudioModule,
   RecordingPresets,
@@ -62,8 +63,29 @@ const SPECIES = [
 ];
 const BEHAVIORS = ['Foraging', 'Resting', 'Moving', 'Aggressive', 'With young', 'Injured'];
 
-const MAX_PHOTOS = 3;
 const MAX_RECORDING_MS = 60_000;
+
+// Picker/recorder output lives in the OS cache, which can be purged before
+// the report is ever viewed again. Copy every attachment into an app-owned
+// documents directory so local URIs stay valid.
+const mediaDirectory = new Directory(Paths.document, 'report-media');
+
+function persistLocalCopy(uri, extensionFallback) {
+  try {
+    if (!mediaDirectory.exists) mediaDirectory.create({ intermediates: true });
+    const rawExt = uri.split('.').pop() ?? '';
+    const ext = rawExt.length > 0 && rawExt.length <= 5 ? rawExt : extensionFallback;
+    const dest = new File(
+      mediaDirectory,
+      `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`,
+    );
+    new File(uri).copy(dest);
+    return dest.uri;
+  } catch (error) {
+    console.warn('[sighting] could not persist media copy:', error.message);
+    return uri;
+  }
+}
 
 /** 83250ms → "01:23" for the recorder timer. */
 function formatMillis(ms) {
@@ -142,9 +164,15 @@ export default function WildlifeSighting() {
   const stopRecording = async () => {
     try {
       await recorder.stop();
-      // recorder.uri is the compressed local file path (expo-file-system URI),
-      // queued into the submission payload below.
-      if (recorder.uri) setVoiceUri(recorder.uri);
+      // Depending on platform/timing the finalized path surfaces on the
+      // recorder or on its state — check both, then copy the file out of the
+      // recorder cache so it survives (and can be replayed) reliably.
+      const uri = recorder.uri ?? recorderState.url ?? null;
+      if (uri) {
+        setVoiceUri(persistLocalCopy(uri, 'm4a'));
+      } else {
+        Alert.alert('Voice note', 'The recording could not be saved — please try again.');
+      }
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
     } catch (error) {
       Alert.alert('Recording failed', error.message);
@@ -161,7 +189,10 @@ export default function WildlifeSighting() {
   /* ---------- Photo evidence (expo-image-picker) ---------- */
 
   const addPhoto = (uri) => {
-    if (uri) setPhotos((existing) => [...existing, uri].slice(0, MAX_PHOTOS));
+    if (uri) {
+      const durable = persistLocalCopy(uri, 'jpg');
+      setPhotos((existing) => [...existing, durable]);
+    }
   };
 
   const takePhoto = async () => {
@@ -193,10 +224,6 @@ export default function WildlifeSighting() {
   };
 
   const promptAddPhoto = () => {
-    if (photos.length >= MAX_PHOTOS) {
-      Alert.alert('Photo evidence', `Up to ${MAX_PHOTOS} photos per report.`);
-      return;
-    }
     Alert.alert('Add photo', 'How would you like to add evidence?', [
       { text: 'Take photo', onPress: takePhoto },
       { text: 'Choose from library', onPress: pickFromLibrary },
@@ -327,15 +354,16 @@ export default function WildlifeSighting() {
         {/* ---------- Photo evidence ---------- */}
         <Card style={styles.formCard}>
           <FieldLabel>{t('sighting.photoEvidence')}</FieldLabel>
+          {/* Unlimited photos: every picked/captured shot gets a tile, and the
+              dashed add tile is always available for the next one. */}
           <View style={styles.photoGrid}>
-            <PhotoSlot uri={photos[0]} onRemove={() => removePhoto(photos[0])} onAdd={pickFromLibrary} />
-            <PhotoSlot uri={photos[1]} onRemove={() => removePhoto(photos[1])} onAdd={pickFromLibrary} />
+            {photos.map((uri) => (
+              <PhotoSlot key={uri} uri={uri} onRemove={() => removePhoto(uri)} />
+            ))}
+            {photos.length === 0 && <PhotoSlot onAdd={pickFromLibrary} />}
+            {photos.length === 0 && <PhotoSlot onAdd={takePhoto} />}
             <TouchableOpacity style={styles.addPhoto} onPress={promptAddPhoto}>
-              {photos[2] ? (
-                <Image source={{ uri: photos[2] }} style={styles.photoImage} contentFit="cover" />
-              ) : (
-                <Camera size={20} color={colors.mutedForeground} />
-              )}
+              <Camera size={20} color={colors.mutedForeground} />
             </TouchableOpacity>
           </View>
         </Card>
@@ -477,12 +505,12 @@ function PhotoSlot({ uri, onRemove, onAdd }) {
     );
   }
   return (
-    <TouchableOpacity style={{ flex: 1 }} onPress={onAdd}>
+    <TouchableOpacity style={styles.photoSlot} onPress={onAdd}>
       <LinearGradient
         colors={gradients.forest}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={styles.photoSlot}
+        style={styles.photoFill}
       >
         <ImageIcon size={20} color="rgba(255,255,255,0.7)" />
       </LinearGradient>
@@ -514,18 +542,24 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   selectValue: { fontSize: 14, color: colors.foreground, fontFamily: fonts.regular },
-  photoGrid: { flexDirection: 'row', gap: 8 },
+  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   photoSlot: {
-    flex: 1,
+    width: '31%',
     aspectRatio: 1,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
+  photoFill: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   photoImage: { width: '100%', height: '100%', borderRadius: radius.md },
   addPhoto: {
-    flex: 1,
+    width: '31%',
     aspectRatio: 1,
     borderRadius: radius.md,
     borderWidth: 2,

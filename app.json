@@ -16,7 +16,14 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.silverback.sentry"
+      "bundleIdentifier": "com.silverback.sentry",
+      "infoPlist": {
+        "UIViewControllerBasedStatusBarAppearance": true,
+        "NSCameraUsageDescription": "SilverBack Sentry uses the camera to capture wildlife evidence photos and your profile picture.",
+        "NSMicrophoneUsageDescription": "SilverBack Sentry records voice notes for wildlife reports.",
+        "NSPhotoLibraryUsageDescription": "SilverBack Sentry lets you attach photos from your library to wildlife reports.",
+        "NSLocationWhenInUseUsageDescription": "SilverBack Sentry tags reports and SOS alerts with your GPS position so rangers can respond."
+      }
     },
     "android": {
       "package": "com.silverback.sentry",
@@ -47,7 +54,8 @@
           "microphonePermission": "Allow SilverBack Sentry to record voice notes for wildlife reports."
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-font"
     ],
     "extra": {
       "eas": {

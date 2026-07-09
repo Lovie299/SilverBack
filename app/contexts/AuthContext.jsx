@@ -44,8 +44,9 @@ export const AuthProvider = ({ children }) => {
       if (user) {
         setUser(user);
         await AsyncStorage.setItem('user', JSON.stringify(user));
-        // Check biometric settings for this user
-        await loadBiometricSettings();
+        // Check biometric settings for this user (pass the uid explicitly —
+        // the `user` state variable hasn't updated yet inside this closure).
+        await loadBiometricSettings(user.uid);
       } else {
         setUser(null);
         await AsyncStorage.removeItem('user');
@@ -84,11 +85,15 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Load biometric settings for current user
-  const loadBiometricSettings = async () => {
-    if (!user) return;
+  // Load biometric settings for a user. Accepts the uid explicitly because
+  // callers often run before the `user` state has propagated (fresh sign-in,
+  // onAuthStateChanged) — relying on the state variable left the toggle
+  // stuck "off" after logging back in.
+  const loadBiometricSettings = async (uid) => {
+    const id = uid ?? user?.uid ?? auth.currentUser?.uid;
+    if (!id) return;
     try {
-      const enabled = await AsyncStorage.getItem(`${BIOMETRIC_ENABLED_KEY}_${user.uid}`);
+      const enabled = await AsyncStorage.getItem(`${BIOMETRIC_ENABLED_KEY}_${id}`);
       setBiometricEnabled(enabled === 'true');
     } catch (error) {
       console.error('Failed to load biometric settings:', error);
@@ -198,7 +203,7 @@ export const AuthProvider = ({ children }) => {
       console.log('User created successfully:', userCredential.user.uid);
       await storeCredentials(email, password);
       // Initialize biometric settings for new user
-      await loadBiometricSettings();
+      await loadBiometricSettings(userCredential.user.uid);
       return { success: true };
     } catch (error) {
       console.error('Sign up error:', error.message);
@@ -212,7 +217,7 @@ export const AuthProvider = ({ children }) => {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       console.log('Sign in successful:', userCredential.user.uid);
       await storeCredentials(email, password);
-      await loadBiometricSettings();
+      await loadBiometricSettings(userCredential.user.uid);
       return { success: true };
     } catch (error) {
       console.error('Sign in error:', error.message);

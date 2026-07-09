@@ -41,3 +41,6 @@ app-example
 # generated native folders
 /ios
 /android
+
+# local env (contains project config; keep real secrets out of git)
+.env

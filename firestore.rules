@@ -1,0 +1,112 @@
+rules_version = '2';
+
+// ============================================================================
+// SilverBack Sentry — Firestore security rules
+//
+// Role model: the authoritative role lives in the user's custom auth claims
+// (request.auth.token.role), mirrored from users/{uid}.role by the
+// syncUserRoleClaim Cloud Function. Clients can never grant themselves a
+// privileged role: profile writes may not change the `role` field, and the
+// claim itself is only writable by the Admin SDK.
+// ============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function tokenRole() {
+      // Missing claim (brand-new account before first claim sync) → 'community'.
+      return isSignedIn() && 'role' in request.auth.token
+        ? request.auth.token.role
+        : 'community';
+    }
+
+    function isAdmin() {
+      return isSignedIn() && tokenRole() == 'admin';
+    }
+
+    function isRangerOrAdmin() {
+      return isSignedIn() && (tokenRole() == 'ranger' || tokenRole() == 'admin');
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ---------- users ----------
+    // A user may read/write only their own profile document; admins may
+    // read/write any profile. Non-admins cannot change their own `role`
+    // (privilege escalation guard) or `uid`.
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+
+      allow create: if isAdmin()
+        || (isOwner(userId)
+            && request.resource.data.uid == userId
+            && request.resource.data.role in ['community', 'ranger', 'tourist']);
+
+      allow update: if isAdmin()
+        || (isOwner(userId)
+            && request.resource.data.uid == resource.data.uid
+            && request.resource.data.role == resource.data.role);
+
+      allow delete: if isAdmin();
+    }
+
+    // ---------- sightings ----------
+    // Universal read/write for every authenticated user (community reporting
+    // is the core loop — do not gate it).
+
+    match /sightings/{sightingId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // ---------- reports ----------
+    // Same open model as sightings: any authenticated user can file and
+    // triage human–wildlife conflict reports.
+
+    match /reports/{reportId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // ---------- snares ----------
+    // Sensitive anti-poaching data: readable by any signed-in user (community
+    // safety), but only rangers and admins may create/update/delete records.
+
+    match /snares/{snareId} {
+      allow read: if isSignedIn();
+      allow write: if isRangerOrAdmin();
+    }
+
+    // ---------- certifications ----------
+    // Users may read their own certification records; grading and issuance
+    // happen server-side (Admin SDK bypasses rules), so clients never write.
+
+    match /certifications/{certId} {
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    // ---------- trackingEvents ----------
+    // Collared-animal GPS ingest: rangers/admins write, everyone signed-in
+    // can read (drives the shared live map and boundary-breach awareness).
+
+    match /trackingEvents/{eventId} {
+      allow read: if isSignedIn();
+      allow write: if isRangerOrAdmin();
+    }
+
+    // ---------- default deny ----------
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

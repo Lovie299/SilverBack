@@ -6,5 +6,13 @@
     "**/*.tsx",
     "app/_layout.jsx",
     "app/index.jsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "functions",
+    "babel.config.js",
+    "metro.config.js",
+    "android",
+    "ios"
   ]
 }

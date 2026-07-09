@@ -98,10 +98,12 @@ function formatMillis(ms) {
 /** Best-effort Storage upload; returns the download URL or null on failure. */
 async function uploadMediaAsync(localUri, storagePath, contentType) {
   try {
-    const response = await fetch(localUri);
-    const blob = await response.blob();
+    // Read the file bytes directly — RN's fetch() is unreliable with
+    // file:// URIs, which made uploads fail and left dead local paths
+    // in Firestore.
+    const bytes = await new File(localUri).bytes();
     const storageRef = ref(storage, storagePath);
-    await uploadBytes(storageRef, blob, { contentType });
+    await uploadBytes(storageRef, bytes, { contentType });
     return await getDownloadURL(storageRef);
   } catch (error) {
     console.warn('[sighting] media upload failed, keeping local URI:', error.message);

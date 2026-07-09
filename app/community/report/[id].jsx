@@ -21,6 +21,7 @@ import { MapPin, Play } from 'lucide-react-native';
 import { db } from '../../../firebaseConfig';
 import { colors, radius, fonts, alpha } from '../../../components/ui/theme';
 import { AppBar, Badge, Card, FieldLabel } from '../../../components/ui/Primitives';
+import { resolveLocalMediaUri } from '../../utils/mediaPaths';
 import { formatReportTime, REPORT_STATUS_TONES } from '../index';
 
 export default function ReportDetail() {
@@ -37,10 +38,11 @@ export default function ReportDetail() {
   }, []);
 
   const playVoiceNote = async () => {
-    if (!report?.voiceNoteUrl) return;
+    const voiceUri = resolveLocalMediaUri(report?.voiceNoteUrl);
+    if (!voiceUri) return;
     await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
     playerRef.current?.remove();
-    playerRef.current = createAudioPlayer({ uri: report.voiceNoteUrl });
+    playerRef.current = createAudioPlayer({ uri: voiceUri });
     playerRef.current.play();
   };
 
@@ -119,7 +121,12 @@ export default function ReportDetail() {
               <FieldLabel>{t('sighting.photoEvidence')}</FieldLabel>
               <View style={styles.photoGrid}>
                 {report.images.map((uri) => (
-                  <Image key={uri} source={{ uri }} style={styles.photo} contentFit="cover" />
+                  <Image
+                    key={uri}
+                    source={{ uri: resolveLocalMediaUri(uri) }}
+                    style={styles.photo}
+                    contentFit="cover"
+                  />
                 ))}
               </View>
             </Card>

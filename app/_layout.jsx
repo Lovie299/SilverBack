@@ -4,6 +4,7 @@
 
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
@@ -35,15 +36,19 @@ function AppContent() {
   }, []);
 
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        contentStyle: { backgroundColor: colors.background },
-        animation: 'slide_from_right',
-        statusBarStyle: 'dark',
-        statusBarTranslucent: true,
-      }}
-    />
+    <>
+      {/* expo-status-bar instead of the react-native-screens statusBar*
+          screen options — those hit native iOS status-bar APIs and log
+          "UIViewControllerBasedStatusBarAppearance … to YES" warnings. */}
+      <StatusBar style="dark" translucent />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+          animation: 'slide_from_right',
+        }}
+      />
+    </>
   );
 }
 

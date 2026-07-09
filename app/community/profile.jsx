@@ -102,10 +102,10 @@ export default function Profile() {
     // even if the Storage upload below cannot complete offline.
     let finalUri = persistAvatarCopy(pickedUri);
     try {
-      const response = await fetch(finalUri);
-      const blob = await response.blob();
+      // Read bytes directly — RN's fetch() is unreliable with file:// URIs.
+      const bytes = await new File(finalUri).bytes();
       const fileRef = storageRef(storage, `avatars/${user.uid}`);
-      await uploadBytes(fileRef, blob, { contentType: 'image/jpeg' });
+      await uploadBytes(fileRef, bytes, { contentType: 'image/jpeg' });
       finalUri = await getDownloadURL(fileRef);
       // photoURL must be an http(s) URL — only set after a successful upload.
       if (auth.currentUser) {
